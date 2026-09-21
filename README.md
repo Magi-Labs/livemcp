@@ -6,7 +6,38 @@
 
 Control your existing Chrome profile through MCP. LiveMCP uses a local or hosted hub and a Manifest V3 extension, preserving the browser's logged-in sessions. Version 2 focuses on efficient agent workflows: stable element references, bounded observations, action results that include state, and sequential batches.
 
-## Build and connect
+## Quick install — published release
+
+Requires Node.js 18+ and Chrome/Chromium on macOS or Linux. Download **extension.zip**, **livemcp-2.3.0.tgz**, and **SHA256SUMS** from [v2.3.0](https://github.com/Magi-Labs/livemcp/releases/tag/v2.3.0) into the same directory.
+
+```sh
+# macOS (Linux: sha256sum -c SHA256SUMS)
+shasum -a 256 -c SHA256SUMS
+npm install --prefix ./livemcp-local ./livemcp-2.3.0.tgz
+unzip extension.zip -d ./livemcp-browser
+./livemcp-local/node_modules/.bin/livemcp-hub
+```
+
+Keep the hub running. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted folder containing `manifest.json`. In the extension popup, set **Server URL** to `ws://127.0.0.1:17691`, give the browser a name, and click **Connect**.
+
+Add this to your MCP client's configuration, replacing the absolute path with your installation directory:
+
+```json
+{
+  "mcpServers": {
+    "livemcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/livemcp-local/node_modules/livemcp/dist/index.js"]
+    }
+  }
+}
+```
+
+Restart your MCP client. Ask it to list connected browsers and tabs, then select the browser you intend to use. The extension can access logged-in pages and browser data; connect a profile appropriate for the task.
+
+The release archive installation, checksum verification, hub startup, and discovery of all 39 MCP tools were verified on macOS on September 21, 2026. This path does not depend on the npm registry package named `livemcp`.
+
+## Build from source and connect
 
 Requires Node.js 18+ and Chrome/Chromium. Local stdio uses a Unix-like host. For hosted deployment, use the Node 22 Dockerfile and [hosting guide](HOSTING.md).
 
@@ -29,7 +60,7 @@ Load `extension/` as an unpacked extension from `chrome://extensions`, enter the
 }
 ```
 
-Use a source build. The npm registry name has historically been a holding package; this repository is the intended source. No model selection or API credentials are configured by LiveMCP.
+Use the release archive above or build this repository. The npm registry name has historically been a holding package. No model selection or API credentials are configured by LiveMCP.
 
 ## Multiple browsers
 
