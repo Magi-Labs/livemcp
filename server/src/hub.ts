@@ -2,12 +2,13 @@ import { createServer as createNetServer } from 'node:net';
 import { createServer, type IncomingMessage } from 'node:http';
 import { chmodSync, unlinkSync } from 'node:fs';
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { DEFAULT_WS_PORT } from '@livemcp/shared';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { BrowserRouter, validHello } from './router.js';
 import { createMcpServer } from './mcp-server.js';
+import { createDashboard } from './dashboard.js';
 import type { Bridge } from './bridge.js';
 
 export const HUB_SOCK = process.env.LIVEMCP_HUB_SOCK ?? '/tmp/livemcp-hub.sock';
@@ -33,6 +34,12 @@ for (const a of accounts) {
   }
   a.router = new BrowserRouter();
 }
+const dashboardPassword = process.env.LIVEMCP_DASHBOARD_PASSWORD;
+if (dashboardPassword && (dashboardPassword.length < 32 || dashboardPassword.length > 256 || /[^!-~]/.test(dashboardPassword) || tokens.has(dashboardPassword))) {
+  throw new Error('LIVEMCP_DASHBOARD_PASSWORD must be a distinct password of 32–256 printable ASCII characters without spaces');
+}
+if (dashboardPassword && !loopback && !publicUrl) throw new Error('Set LIVEMCP_PUBLIC_URL to enable the network dashboard');
+const dashboard = dashboardPassword ? createDashboard(dashboardPassword, accounts) : undefined;
 const local: Account = { id: 'local', agentToken: '', browserToken: '', router: new BrowserRouter() };
 const hash = (s: string) => createHash('sha256').update(s).digest();
 function authenticate(value: unknown, role: 'agentToken' | 'browserToken'): Account | undefined {
@@ -57,6 +64,7 @@ const httpServer = createServer(async (req, res) => {
   const respond = (code: number, message: string) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ error: message })); };
   if (!requestAllowed(req)) { respond(403, 'Host or Origin not allowed'); return; }
   if (req.url === '/healthz' && req.method === 'GET') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"status":"ok"}'); return; }
+  if (dashboard?.handle(req, res)) return;
   if (req.url !== '/mcp') { respond(404, 'Not found'); return; }
   const authorization = req.headers.authorization;
   const account = authenticate(authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined, 'agentToken');
@@ -78,18 +86,30 @@ const httpServer = createServer(async (req, res) => {
       if (sessionId || req.method !== 'POST' || !isInitializeRequest(body)) { respond(400, 'Initialize an MCP session first'); return; }
       if (httpSessions.size >= 1000 || [...httpSessions.values()].filter(s => s.owner === account.id).length >= 100) { respond(503, 'Session limit reached'); return; }
       const bridge = account.router.session();
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID(), enableJsonResponse: true, onsessioninitialized: id => { httpSessions.set(id, fresh!); } });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
+        onsessioninitialized: id => {
+          httpSessions.set(id, fresh!);
+          dashboard?.log('MCP session opened');
+        },
+      });
       session = fresh = { owner: account.id, transport, bridge, touched: Date.now() };
       const mcp = createMcpServer(bridge);
       await mcp.connect(transport);
       const onclose = transport.onclose;
-      transport.onclose = () => { if (transport.sessionId) httpSessions.delete(transport.sessionId); void bridge.close(); onclose?.(); };
+      transport.onclose = () => {
+        if (transport.sessionId && httpSessions.delete(transport.sessionId)) dashboard?.log('MCP session closed');
+        void bridge.close();
+        onclose?.();
+      };
     }
     session.touched = Date.now();
     res.setHeader('Cache-Control', 'no-store');
     await session.transport.handleRequest(req, res, body);
     if (fresh && !fresh.transport.sessionId) { await fresh.transport.close(); await fresh.bridge.close(); }
   } catch {
+    dashboard?.log('MCP request failed');
     if (fresh) { await fresh.transport.close(); await fresh.bridge.close(); }
     if (!res.headersSent) respond(500, 'MCP request failed'); else res.end();
   }
@@ -99,12 +119,17 @@ httpServer.headersTimeout = 15000;
 const expiry = setInterval(() => { for (const s of httpSessions.values()) if (Date.now() - s.touched > 30 * 60 * 1000) void s.transport.close(); }, 60000);
 expiry.unref();
 const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024, perMessageDeflate: false });
+function logBrowserConnection(ws: WebSocket) {
+  if (!dashboard) return;
+  dashboard.log('Browser connected');
+  ws.once('close', () => dashboard.log('Browser disconnected'));
+}
 httpServer.on('upgrade', (req, sock, head) => {
   const path = req.url?.split('?')[0];
   if (!requestAllowed(req, true) || (path !== '/browser' && (authenticated || path !== '/'))) { sock.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
   if (wss.clients.size >= 1000) { sock.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'); return; }
   wss.handleUpgrade(req, sock, head, ws => {
-    if (!authenticated) { local.router.attach(ws); return; }
+    if (!authenticated) { local.router.attach(ws); logBrowserConnection(ws); return; }
     const timeout = setTimeout(() => ws.close(1008, 'Authentication timeout'), 5000);
     ws.on('error', () => {});
     ws.on('close', () => clearTimeout(timeout));
@@ -114,6 +139,7 @@ httpServer.on('upgrade', (req, sock, head) => {
       const account = validHello(hello) ? authenticate(hello.token, 'browserToken') : undefined;
       if (!account) { ws.close(1008, 'Invalid browser access token or hello'); return; }
       account.router.attach(ws, hello); ws.send(JSON.stringify({ type: 'hello_ack' }));
+      logBrowserConnection(ws);
     });
   });
 });
@@ -155,7 +181,10 @@ const ipcServer = createNetServer(sock => {
 ipcServer.on('error', error => { process.stderr.write(`[livemcp-hub] IPC: ${error.message}. Stop the existing hub or use another LIVEMCP_HUB_SOCK; remove stale sockets only after checking the hub is stopped.\n`); shutdown(1); });
 if (process.env.LIVEMCP_DISABLE_IPC !== '1') ipcServer.listen(HUB_SOCK, () => { ownsSocket = true; chmodSync(HUB_SOCK, 0o600); });
 httpServer.on('error', error => { process.stderr.write(`[livemcp-hub] ${error.message}\n`); shutdown(1); });
-httpServer.listen(port, host, () => process.stderr.write(`[livemcp-hub] Ready — HTTP /mcp and WebSocket /browser on ${host}:${port}; ${authenticated ? 'authenticated' : 'local only'}\n`));
+httpServer.listen(port, host, () => {
+  dashboard?.log('Hub started');
+  process.stderr.write(`[livemcp-hub] Ready — HTTP /mcp and WebSocket /browser on ${host}:${port}; ${authenticated ? 'authenticated' : 'local only'}\n`);
+});
 function shutdown(code = 0) {
   clearInterval(expiry); for (const s of httpSessions.values()) void s.transport.close();
   for (const a of [...accounts, local]) a.router.close();

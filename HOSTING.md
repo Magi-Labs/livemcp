@@ -33,6 +33,10 @@ This is manually configured bearer authentication, not an OAuth discovery/login 
 
 For a platform that already terminates HTTPS, build the Dockerfile, supply both environment variables, expose container port 17691, and forward the original Host header and WebSocket upgrades. Use `/healthz` for health checks. Set a proxy request timeout of at least 60 seconds. Do not rewrite `/mcp` or `/browser`. Do not expose the backend over unencrypted public HTTP.
 
+## Operator dashboard
+
+Set `LIVEMCP_DASHBOARD_PASSWORD` to a separate random secret from `openssl rand -hex 32`. Open `/dashboard` on your HTTPS hub URL and sign in as `admin`. This account can copy every configured agent and browser token. The dashboard also shows the latest 200 hub events since startup, including browser connections and MCP session activity. It records no request payloads or browser-page content. Leave the password unset to disable the dashboard.
+
 ## Run directly on a server
 
 ```sh
@@ -77,7 +81,7 @@ For authenticated local stdio access in this mode, set the client's `LIVEMCP_TOK
 
 - Run **one replica**. Browser connections and agent sessions are in memory; this release does not distribute state across hubs. A second replica behind a load balancer cannot route the first one's browsers.
 - HTTP sessions expire after 30 minutes without requests. Restarting the hub clears them; the MCP client must initialize a new session and rediscover/select a browser. Extension connections retry automatically. Browser actions are never automatically replayed after a disconnect.
-- Rotate credentials by changing the environment and restarting the hub, then updating agents/extensions. No account management UI or OAuth flow is included.
+- Rotate credentials by changing the environment and restarting the hub, then updating agents/extensions.
 - Host and Origin validation protects the endpoints. Set `LIVEMCP_PUBLIC_URL` correctly even when the reverse proxy reaches a loopback listener. The hub does not trust forwarded headers to bypass checks.
 - The hub can read and control connected, logged-in browser profiles. Host it on infrastructure you trust and keep access tokens private. TLS terminates at the proxy; traffic from proxy to hub must stay on a trusted host/network.
 - Bounds: 100 HTTP sessions per account, 1,000 total; 100 pending actions per session, 1,000 per account; 1,000 WebSocket connections; 4 MB HTTP request bodies; 32 MB browser messages. Unauthenticated WebSockets have five seconds to send their authenticated hello.
