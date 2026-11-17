@@ -35,11 +35,15 @@ for (const a of accounts) {
   a.router = new BrowserRouter();
 }
 const dashboardPassword = process.env.LIVEMCP_DASHBOARD_PASSWORD;
-if (dashboardPassword && (dashboardPassword.length < 32 || dashboardPassword.length > 256 || /[^!-~]/.test(dashboardPassword) || tokens.has(dashboardPassword))) {
-  throw new Error('LIVEMCP_DASHBOARD_PASSWORD must be a distinct password of 32–256 printable ASCII characters without spaces');
+const dashboardUsername = process.env.LIVEMCP_DASHBOARD_USERNAME || 'admin';
+if (dashboardPassword && (dashboardPassword.length < 12 || dashboardPassword.length > 256 || /[^!-~]/.test(dashboardPassword) || tokens.has(dashboardPassword))) {
+  throw new Error('LIVEMCP_DASHBOARD_PASSWORD must be a distinct password of 12–256 printable ASCII characters without spaces');
+}
+if (dashboardPassword && (dashboardUsername.length > 128 || /[^!-~]|:/.test(dashboardUsername))) {
+  throw new Error('LIVEMCP_DASHBOARD_USERNAME must be 1–128 printable ASCII characters without spaces or colons');
 }
 if (dashboardPassword && !loopback && !publicUrl) throw new Error('Set LIVEMCP_PUBLIC_URL to enable the network dashboard');
-const dashboard = dashboardPassword ? createDashboard(dashboardPassword, accounts) : undefined;
+const dashboard = dashboardPassword ? createDashboard(dashboardUsername, dashboardPassword, accounts) : undefined;
 const local: Account = { id: 'local', agentToken: '', browserToken: '', router: new BrowserRouter() };
 const hash = (s: string) => createHash('sha256').update(s).digest();
 function authenticate(value: unknown, role: 'agentToken' | 'browserToken'): Account | undefined {

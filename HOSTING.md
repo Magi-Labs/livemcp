@@ -35,7 +35,7 @@ For a platform that already terminates HTTPS, build the Dockerfile, supply both 
 
 ## Operator dashboard
 
-Set `LIVEMCP_DASHBOARD_PASSWORD` to a separate random secret from `openssl rand -hex 32`. Open `/dashboard` on your HTTPS hub URL and sign in as `admin`. This account can copy every configured agent and browser token. The dashboard also shows the latest 200 hub events since startup, including browser connections and MCP session activity. It records no request payloads or browser-page content. Leave the password unset to disable the dashboard.
+Set `LIVEMCP_DASHBOARD_PASSWORD` to a separate password of at least 12 characters. Open `/dashboard` on your HTTPS hub URL and sign in as `admin`, or set `LIVEMCP_DASHBOARD_USERNAME` to choose a username. This account can copy every configured agent and browser token. The dashboard also shows the latest 200 hub events since startup, including browser connections and MCP session activity. It records no request payloads or browser-page content. Leave the password unset to disable the dashboard.
 
 ## Run directly on a server
 

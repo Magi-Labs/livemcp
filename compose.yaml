@@ -5,6 +5,7 @@ services:
     environment:
       LIVEMCP_TOKEN: ${LIVEMCP_TOKEN:?Set a random token of at least 32 characters in .env}
       LIVEMCP_PUBLIC_URL: ${LIVEMCP_PUBLIC_URL:?Set your HTTPS hub origin in .env}
+      LIVEMCP_DASHBOARD_USERNAME: ${LIVEMCP_DASHBOARD_USERNAME:-admin}
       LIVEMCP_DASHBOARD_PASSWORD: ${LIVEMCP_DASHBOARD_PASSWORD:-}
     ports:
       - "127.0.0.1:17691:17691"

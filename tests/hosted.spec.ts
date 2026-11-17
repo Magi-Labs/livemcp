@@ -14,15 +14,16 @@ const accounts = [
 test('hosted MCP authenticates, isolates owners, routes tools and closes sessions', async ({ browser: chromium }) => {
   const finder = createServer().listen(0, '127.0.0.1'); await once(finder, 'listening');
   const port = (finder.address() as any).port; await new Promise<void>(r => finder.close(() => r()));
-  const dashboardPassword = 'dashboard-test-secret-'.repeat(3);
-  const hub = spawn(process.execPath, ['server/dist/hub.js'], { env: { ...process.env, LIVEMCP_PORT: String(port), LIVEMCP_HOST: '127.0.0.1', LIVEMCP_DISABLE_IPC: '1', LIVEMCP_ACCOUNTS: JSON.stringify(accounts), LIVEMCP_DASHBOARD_PASSWORD: dashboardPassword }, stdio: ['ignore','ignore','pipe'] });
+  const dashboardUsername = 'operator';
+  const dashboardPassword = 'sample@12345';
+  const hub = spawn(process.execPath, ['server/dist/hub.js'], { env: { ...process.env, LIVEMCP_PORT: String(port), LIVEMCP_HOST: '127.0.0.1', LIVEMCP_DISABLE_IPC: '1', LIVEMCP_ACCOUNTS: JSON.stringify(accounts), LIVEMCP_DASHBOARD_USERNAME: dashboardUsername, LIVEMCP_DASHBOARD_PASSWORD: dashboardPassword }, stdio: ['ignore','ignore','pipe'] });
   let logs = ''; hub.stderr.on('data', b => logs += b);
   const browsers: WebSocket[] = [], clients: Client[] = [];
   let lastRequest: any;
   const base = `http://127.0.0.1:${port}`;
   const endpoint = base + '/mcp';
   const dashboard = base + '/dashboard';
-  const operator = 'Basic ' + Buffer.from('admin:' + dashboardPassword).toString('base64');
+  const operator = 'Basic ' + Buffer.from(`${dashboardUsername}:${dashboardPassword}`).toString('base64');
   async function client(token: string) {
     const transport = new StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers: { Authorization: `Bearer ${token}` } } });
     const c = new Client({ name: 'test', version: '1' }); clients.push(c); await c.connect(transport); return { c, transport };
@@ -43,6 +44,7 @@ test('hosted MCP authenticates, isolates owners, routes tools and closes session
     expect(anonymous.status).toBe(401);
     expect(anonymous.headers.get('www-authenticate')).toContain('Basic');
     expect(await anonymous.text()).not.toContain(accounts[0].agentToken);
+    expect((await fetch(dashboard, { headers: { Authorization: 'Basic ' + Buffer.from('admin:' + dashboardPassword).toString('base64') } })).status).toBe(401);
     expect((await fetch(dashboard, { headers: { Authorization: `Bearer ${accounts[0].agentToken}` } })).status).toBe(401);
     expect((await fetch(dashboard, { headers: { Authorization: operator, Origin: 'https://evil.example' } })).status).toBe(403);
     expect((await fetch(dashboard, { method: 'POST', headers: { Authorization: operator } })).status).toBe(405);
@@ -82,7 +84,7 @@ test('hosted MCP authenticates, isolates owners, routes tools and closes session
     expect(activity).toContain('MCP session closed');
     expect(activity).not.toContain(accounts[0].agentToken);
     const context = await chromium.newContext({
-      httpCredentials: { username: 'admin', password: dashboardPassword },
+      httpCredentials: { username: dashboardUsername, password: dashboardPassword },
       permissions: ['clipboard-read', 'clipboard-write'],
     });
     try {

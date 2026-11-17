@@ -13,8 +13,8 @@ const escape = (value: string) => value.replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]!);
 
-export function createDashboard(password: string, accounts: readonly Credentials[]) {
-  const expected = digest(`admin:${password}`);
+export function createDashboard(username: string, password: string, accounts: readonly Credentials[]) {
+  const expected = digest(`${username}:${password}`);
   const entries: { at: string; message: string }[] = [];
 
   function log(message: string) {
